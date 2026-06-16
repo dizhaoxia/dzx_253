@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { problemAPI, rankingAPI } from '../api';
+import { useSocket } from '../context/SocketContext';
 
 const Home = () => {
   const [stats, setStats] = useState({ problems: 0, users: 0 });
   const [loading, setLoading] = useState(true);
+  const { globalSolvedFeed } = useSocket();
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -26,6 +28,12 @@ const Home = () => {
     fetchStats();
   }, []);
 
+  const formatTime = (timestamp) => {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
   if (loading) {
     return <div className="loading"><div className="spinner"></div></div>;
   }
@@ -46,6 +54,27 @@ const Home = () => {
           <div className="stat-number">{stats.users}</div>
           <div className="stat-label">注册用户</div>
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: '2rem' }}>
+        <h2 style={{ marginBottom: '1rem' }}>实时解题动态</h2>
+        {globalSolvedFeed.length === 0 ? (
+          <p style={{ color: '#666', textAlign: 'center', padding: '1rem' }}>暂无解题动态</p>
+        ) : (
+          <div className="solved-feed">
+            {globalSolvedFeed.map((item, index) => (
+              <div key={`${item.user_id}-${item.problem_id}-${item.timestamp}-${index}`} className="solved-feed-item">
+                <div className="solved-feed-icon">✅</div>
+                <div className="solved-feed-content">
+                  <span className="solved-feed-username">{item.username}</span>
+                  <span className="solved-feed-text"> 解决了 </span>
+                  <span className="solved-feed-problem">#{item.problem_id} {item.problem_title}</span>
+                </div>
+                <div className="solved-feed-time">{formatTime(item.timestamp)}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="card" style={{ marginTop: '2rem', textAlign: 'center' }}>

@@ -1,9 +1,13 @@
 const express = require('express');
 const { pool } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
-const judgeQueue = require('../judge/judgeQueue');
+const { judgeQueue, STATUS_DISPLAY } = require('../judge/judgeQueue');
 
 const router = express.Router();
+
+const getDisplayStatus = (status) => {
+  return STATUS_DISPLAY[status] || status;
+};
 
 router.post('/', authenticateToken, async (req, res) => {
   try {
@@ -24,8 +28,8 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     const [result] = await pool.execute(
-      'INSERT INTO submissions (user_id, problem_id, code, language, status) VALUES (?, ?, ?, ?, ?)',
-      [user_id, problem_id, code, language, 'Pending']
+      'INSERT INTO submissions (user_id, problem_id, code, language, status, score) VALUES (?, ?, ?, ?, ?, ?)',
+      [user_id, problem_id, code, language, 'Pending', 0]
     );
 
     const submission = {
@@ -39,6 +43,8 @@ router.post('/', authenticateToken, async (req, res) => {
     res.status(201).json({
       id: submission.id,
       status: 'Pending',
+      display_status: getDisplayStatus('Pending'),
+      score: 0,
       message: 'Submission received'
     });
 
@@ -55,7 +61,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     const [submissions] = await pool.execute(`
-      SELECT s.id, s.user_id, s.problem_id, s.language, s.status, s.time_used, s.memory_used, s.created_at,
+      SELECT s.id, s.user_id, s.problem_id, s.language, s.status, s.score, s.time_used, s.memory_used, s.error_message, s.created_at, s.code,
              u.username, p.title as problem_title
       FROM submissions s
       LEFT JOIN users u ON s.user_id = u.id
@@ -67,7 +73,22 @@ router.get('/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Submission not found' });
     }
 
-    res.json(submissions[0]);
+    const submission = submissions[0];
+    submission.display_status = getDisplayStatus(submission.status);
+
+    const [testCases] = await pool.execute(`
+      SELECT id, test_case_number, status, time_used, memory_used, actual_output, error_message, created_at
+      FROM submission_test_cases
+      WHERE submission_id = ?
+      ORDER BY test_case_number ASC
+    `, [id]);
+
+    submission.test_cases = testCases.map(tc => ({
+      ...tc,
+      display_status: getDisplayStatus(tc.status)
+    }));
+
+    res.json(submission);
   } catch (error) {
     console.error('Get submission error:', error);
     res.status(500).json({ error: 'Failed to get submission' });
@@ -78,7 +99,7 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     const { user_id, problem_id, limit = 50, offset = 0 } = req.query;
 
-    let query = 'SELECT s.id, s.user_id, s.problem_id, s.language, s.status, s.time_used, s.memory_used, s.created_at, u.username, p.title as problem_title FROM submissions s LEFT JOIN users u ON s.user_id = u.id LEFT JOIN problems p ON s.problem_id = p.id';
+    let query = 'SELECT s.id, s.user_id, s.problem_id, s.language, s.status, s.score, s.time_used, s.memory_used, s.created_at, u.username, p.title as problem_title FROM submissions s LEFT JOIN users u ON s.user_id = u.id LEFT JOIN problems p ON s.problem_id = p.id';
     const conditions = [];
     const values = [];
 
@@ -102,7 +123,13 @@ router.get('/', authenticateToken, async (req, res) => {
     const [submissions] = values.length > 0
       ? await pool.execute(query, values)
       : await pool.query(query);
-    res.json(submissions);
+
+    const result = submissions.map(s => ({
+      ...s,
+      display_status: getDisplayStatus(s.status)
+    }));
+
+    res.json(result);
   } catch (error) {
     console.error('Get submissions error:', error.message, error.sql || '');
     res.status(500).json({ error: 'Failed to get submissions' });

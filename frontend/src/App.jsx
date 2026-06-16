@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { SocketProvider } from './context/SocketContext';
 import Navbar from './components/Navbar';
 import Home from './pages/Home';
 import Auth from './pages/Auth';
@@ -8,6 +9,7 @@ import ProblemDetail from './pages/ProblemDetail';
 import Submissions from './pages/Submissions';
 import Rankings from './pages/Rankings';
 import Admin from './pages/Admin';
+import Rooms from './pages/Rooms';
 
 const ProtectedRoute = ({ children, requireAdmin = false }) => {
   const { user, loading } = useAuth();
@@ -47,6 +49,14 @@ function AppContent() {
           />
           <Route path="/rankings" element={<Rankings />} />
           <Route 
+            path="/rooms" 
+            element={
+              <ProtectedRoute>
+                <Rooms />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
             path="/admin" 
             element={
               <ProtectedRoute requireAdmin={true}>
@@ -63,7 +73,9 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <SocketProvider>
+        <AppContent />
+      </SocketProvider>
     </AuthProvider>
   );
 }

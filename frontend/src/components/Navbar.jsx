@@ -12,6 +12,7 @@ const Navbar = () => {
           <Link to="/">首页</Link>
           <Link to="/problems">题目列表</Link>
           <Link to="/rankings">排行榜</Link>
+          {user && <Link to="/rooms">比赛房间</Link>}
           {user && <Link to="/submissions">提交记录</Link>}
           {isAdmin() && <Link to="/admin">管理后台</Link>}
           {user ? (

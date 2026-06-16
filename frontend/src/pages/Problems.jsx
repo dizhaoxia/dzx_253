@@ -45,6 +45,7 @@ const Problems = () => {
               <div className="problem-meta">
                 <span>⏱️ {problem.time_limit}ms</span>
                 <span>💾 {problem.memory_limit}MB</span>
+                <span>🧪 {problem.test_case_count || 0} 测试点</span>
               </div>
             </div>
           ))}

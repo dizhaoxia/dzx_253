@@ -19,6 +19,22 @@ const Admin = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  const [showTestCaseModal, setShowTestCaseModal] = useState(false);
+  const [currentProblem, setCurrentProblem] = useState(null);
+  const [testCases, setTestCases] = useState([]);
+  const [testCasesLoading, setTestCasesLoading] = useState(false);
+
+  const [showTestCaseForm, setShowTestCaseForm] = useState(false);
+  const [editingTestCase, setEditingTestCase] = useState(null);
+  const [testCaseForm, setTestCaseForm] = useState({
+    input_text: '',
+    expected_output: '',
+    is_sample: false
+  });
+
+  const [importFile, setImportFile] = useState(null);
+  const [importing, setImporting] = useState(false);
+
   useEffect(() => {
     fetchProblems();
   }, []);
@@ -109,6 +125,117 @@ const Admin = () => {
     }));
   };
 
+  const handleManageTestCases = async (problem) => {
+    setCurrentProblem(problem);
+    setShowTestCaseModal(true);
+    setError('');
+    setSuccess('');
+    await fetchTestCases(problem.id);
+  };
+
+  const fetchTestCases = async (problemId) => {
+    setTestCasesLoading(true);
+    try {
+      const response = await problemAPI.getTestCases(problemId);
+      setTestCases(response.data);
+    } catch (error) {
+      console.error('Failed to fetch test cases:', error);
+      setError('获取测试用例失败');
+    } finally {
+      setTestCasesLoading(false);
+    }
+  };
+
+  const handleAddTestCase = () => {
+    setEditingTestCase(null);
+    setTestCaseForm({
+      input_text: '',
+      expected_output: '',
+      is_sample: false
+    });
+    setShowTestCaseForm(true);
+  };
+
+  const handleEditTestCase = (testCase) => {
+    setEditingTestCase(testCase);
+    setTestCaseForm({
+      input_text: testCase.input_text,
+      expected_output: testCase.expected_output,
+      is_sample: testCase.is_sample
+    });
+    setShowTestCaseForm(true);
+  };
+
+  const handleDeleteTestCase = async (testCaseId) => {
+    if (!confirm('确定要删除这个测试用例吗？')) {
+      return;
+    }
+    try {
+      await problemAPI.deleteTestCase(currentProblem.id, testCaseId);
+      setSuccess('测试用例删除成功');
+      fetchTestCases(currentProblem.id);
+      fetchProblems();
+    } catch (error) {
+      setError(error.response?.data?.error || '删除失败');
+    }
+  };
+
+  const handleTestCaseFormSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+
+    try {
+      if (editingTestCase) {
+        await problemAPI.updateTestCase(currentProblem.id, editingTestCase.id, testCaseForm);
+        setSuccess('测试用例更新成功');
+      } else {
+        await problemAPI.addTestCase(currentProblem.id, testCaseForm);
+        setSuccess('测试用例添加成功');
+      }
+      setShowTestCaseForm(false);
+      fetchTestCases(currentProblem.id);
+      fetchProblems();
+    } catch (err) {
+      setError(err.response?.data?.error || '操作失败');
+    }
+  };
+
+  const handleTestCaseFormChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setTestCaseForm(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleImportFileChange = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      setImportFile(e.target.files[0]);
+    }
+  };
+
+  const handleImportTestCases = async () => {
+    if (!importFile) {
+      setError('请选择 ZIP 文件');
+      return;
+    }
+    setImporting(true);
+    setError('');
+    setSuccess('');
+    try {
+      await problemAPI.importTestCases(currentProblem.id, importFile);
+      setSuccess('测试用例导入成功');
+      setImportFile(null);
+      fetchTestCases(currentProblem.id);
+      fetchProblems();
+    } catch (err) {
+      setError(err.response?.data?.error || '导入失败');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   if (loading) {
     return <div className="loading"><div className="spinner"></div></div>;
   }
@@ -140,6 +267,7 @@ const Admin = () => {
                 <th>标题</th>
                 <th>时间限制</th>
                 <th>内存限制</th>
+                <th>测试点数</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -151,12 +279,21 @@ const Admin = () => {
                   <td>{problem.time_limit}ms</td>
                   <td>{problem.memory_limit}MB</td>
                   <td>
+                    <span className="badge">{problem.test_case_count || 0}</span>
+                  </td>
+                  <td>
                     <div className="admin-actions">
                       <button 
                         className="btn btn-secondary btn-sm"
                         onClick={() => handleEditProblem(problem)}
                       >
                         编辑
+                      </button>
+                      <button 
+                        className="btn btn-primary btn-sm"
+                        onClick={() => handleManageTestCases(problem)}
+                      >
+                        管理测试用例
                       </button>
                       <button 
                         className="btn btn-danger btn-sm"
@@ -292,6 +429,154 @@ const Admin = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showTestCaseModal && (
+        <div className="modal-overlay" onClick={() => setShowTestCaseModal(false)}>
+          <div className="modal-content" style={{ maxWidth: '900px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>管理测试用例 - {currentProblem?.title}</h2>
+              <button className="modal-close" onClick={() => setShowTestCaseModal(false)}>
+                ×
+              </button>
+            </div>
+
+            {error && <div className="alert alert-error">{error}</div>}
+            {success && <div className="alert alert-success">{success}</div>}
+
+            <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+              <button className="btn btn-primary btn-sm" onClick={handleAddTestCase}>
+                + 添加测试用例
+              </button>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input
+                  type="file"
+                  accept=".zip"
+                  onChange={handleImportFileChange}
+                  style={{ display: 'none' }}
+                  id="zip-import"
+                />
+                <label htmlFor="zip-import" className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', display: 'inline-block' }}>
+                  选择 ZIP 文件
+                </label>
+                {importFile && (
+                  <span style={{ fontSize: '0.875rem', color: '#666' }}>
+                    {importFile.name}
+                  </span>
+                )}
+                <button 
+                  className="btn btn-primary btn-sm" 
+                  onClick={handleImportTestCases}
+                  disabled={!importFile || importing}
+                >
+                  {importing ? '导入中...' : '批量导入'}
+                </button>
+              </div>
+            </div>
+
+            {showTestCaseForm && (
+              <div className="card" style={{ marginBottom: '1.5rem', background: '#f8f9fa' }}>
+                <h3 style={{ marginBottom: '1rem' }}>
+                  {editingTestCase ? '编辑测试用例' : '添加测试用例'}
+                </h3>
+                <form onSubmit={handleTestCaseFormSubmit}>
+                  <div className="form-group">
+                    <label>输入文本</label>
+                    <textarea
+                      name="input_text"
+                      value={testCaseForm.input_text}
+                      onChange={handleTestCaseFormChange}
+                      rows={3}
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>期望输出</label>
+                    <textarea
+                      name="expected_output"
+                      value={testCaseForm.expected_output}
+                      onChange={handleTestCaseFormChange}
+                      rows={3}
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <input
+                        type="checkbox"
+                        name="is_sample"
+                        checked={testCaseForm.is_sample}
+                        onChange={handleTestCaseFormChange}
+                      />
+                      是否为样例
+                    </label>
+                  </div>
+                  <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+                    <button 
+                      type="button" 
+                      className="btn btn-secondary"
+                      onClick={() => setShowTestCaseForm(false)}
+                    >
+                      取消
+                    </button>
+                    <button type="submit" className="btn btn-primary">
+                      {editingTestCase ? '更新' : '添加'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {testCasesLoading ? (
+              <div className="loading"><div className="spinner"></div></div>
+            ) : testCases.length === 0 ? (
+              <p style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+                暂无测试用例
+              </p>
+            ) : (
+              <div className="test-case-grid">
+                {testCases.map((tc, index) => (
+                  <div key={tc.id} className="test-case-item">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                      <strong>
+                        测试点 #{index + 1}
+                        {tc.is_sample && <span className="badge" style={{ marginLeft: '0.5rem' }}>样例</span>}
+                      </strong>
+                      <div className="admin-actions">
+                        <button 
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => handleEditTestCase(tc)}
+                        >
+                          编辑
+                        </button>
+                        <button 
+                          className="btn btn-danger btn-sm"
+                          onClick={() => handleDeleteTestCase(tc.id)}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                      <div>
+                        <div style={{ fontSize: '0.75rem', color: '#667eea', fontWeight: 600, marginBottom: '0.25rem' }}>输入</div>
+                        <pre style={{ background: '#1e1e2e', color: '#cdd6f4', padding: '0.75rem', borderRadius: '6px', fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '120px', overflow: 'auto' }}>
+                          {tc.input_text}
+                        </pre>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '0.75rem', color: '#667eea', fontWeight: 600, marginBottom: '0.25rem' }}>期望输出</div>
+                        <pre style={{ background: '#1e1e2e', color: '#cdd6f4', padding: '0.75rem', borderRadius: '6px', fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '120px', overflow: 'auto' }}>
+                          {tc.expected_output}
+                        </pre>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
