@@ -880,10 +880,32 @@ body {
   overflow: hidden;
 }
 
-.members-panel {
-  width: 240px;
+.sidebar-panel {
+  width: 280px;
   border-right: 1px solid #e1e5e9;
   background: #f8f9fa;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.members-section {
+  padding: 1rem;
+  border-bottom: 1px solid #e1e5e9;
+}
+
+.members-section h3,
+.problems-section h3 {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.875rem;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.problems-section {
+  padding: 1rem;
+  flex: 1;
   overflow-y: auto;
 }
 
@@ -1014,6 +1036,88 @@ body {
   flex: 1;
   font-weight: 500;
   color: #333;
+}
+
+.room-problem-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.room-problem-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 8px;
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid #e1e5e9;
+}
+
+.room-problem-item:hover {
+  background: rgba(102, 126, 234, 0.08);
+  border-color: #667eea;
+  transform: translateX(2px);
+}
+
+.room-problem-item .problem-id {
+  font-size: 0.75rem;
+  color: #999;
+  font-weight: 600;
+  min-width: 30px;
+}
+
+.room-problem-item .problem-title-text {
+  flex: 1;
+  font-size: 0.875rem;
+  color: #333;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-problem-item .problem-difficulty {
+  font-size: 0.7rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.difficulty-easy {
+  background: #d4edda;
+  color: #155724;
+}
+
+.difficulty-medium {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.difficulty-hard {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.loading-text,
+.empty-text {
+  text-align: center;
+  color: #999;
+  font-size: 0.875rem;
+  padding: 1rem 0;
+}
+
+.btn-block {
+  width: 100%;
+  display: block;
+}
+
+.room-header-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
 }
 
 .room-list {

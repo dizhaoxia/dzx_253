@@ -498,12 +498,30 @@ class JudgeQueue {
           );
 
           if (existingAc[0].cnt <= 1) {
+            const [userRooms] = await pool.execute(
+              `SELECT r.room_code 
+               FROM room_members rm 
+               INNER JOIN rooms r ON rm.room_id = r.id 
+               WHERE rm.user_id = ?`,
+              [user_id]
+            );
+
             socketManager.broadcastSolvedProblem(
               user_id,
               username,
               problem_id,
               problem.title
             );
+
+            for (const room of userRooms) {
+              socketManager.broadcastSolvedProblem(
+                user_id,
+                username,
+                problem_id,
+                problem.title,
+                room.room_code
+              );
+            }
           }
 
           await delCache('rankings:all');

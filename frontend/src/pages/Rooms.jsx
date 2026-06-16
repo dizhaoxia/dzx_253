@@ -1,21 +1,25 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
-import { roomAPI } from '../api';
+import { roomAPI, problemAPI } from '../api';
 
 const Rooms = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { currentRoom, roomMembers, roomMessages, createRoom, joinRoom, leaveRoom, sendMessage, isConnected } = useSocket();
   const [roomName, setRoomName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [message, setMessage] = useState('');
   const [myRooms, setMyRooms] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [problems, setProblems] = useState([]);
+  const [problemsLoading, setProblemsLoading] = useState(false);
   const messagesEndRef = React.useRef(null);
 
   useEffect(() => {
     if (user) {
       loadMyRooms();
+      loadProblems();
     }
   }, [user]);
 
@@ -29,6 +33,18 @@ const Rooms = () => {
       setMyRooms(res.data);
     } catch (error) {
       console.error('Load rooms error:', error);
+    }
+  };
+
+  const loadProblems = async () => {
+    try {
+      setProblemsLoading(true);
+      const res = await problemAPI.getAll();
+      setProblems(res.data.problems || res.data || []);
+    } catch (error) {
+      console.error('Load problems error:', error);
+    } finally {
+      setProblemsLoading(false);
     }
   };
 
@@ -55,6 +71,19 @@ const Rooms = () => {
 
   const handleQuickJoin = (roomCode) => {
     joinRoom(roomCode);
+  };
+
+  const handleProblemClick = (problemId) => {
+    navigate(`/problems/${problemId}`);
+  };
+
+  const getDifficultyColor = (difficulty) => {
+    const colors = {
+      Easy: 'difficulty-easy',
+      Medium: 'difficulty-medium',
+      Hard: 'difficulty-hard'
+    };
+    return colors[difficulty] || 'difficulty-easy';
   };
 
   const getStatusColor = (status) => {
@@ -164,31 +193,72 @@ const Rooms = () => {
             </button>
           </div>
         </div>
-        <button className="btn btn-danger" onClick={() => leaveRoom()}>
-          离开房间
-        </button>
+        <div className="room-header-actions">
+          <button className="btn btn-secondary" onClick={() => navigate('/problems')}>
+            题目列表
+          </button>
+          <button className="btn btn-danger" onClick={() => leaveRoom()}>
+            离开房间
+          </button>
+        </div>
       </div>
 
       <div className="room-content">
-        <div className="members-panel">
-          <h3>在线成员 ({roomMembers.length})</h3>
-          <div className="member-list">
-            {roomMembers.map((member) => (
-              <div key={member.id} className="member-item">
-                <div className="member-avatar">
-                  {member.username.charAt(0).toUpperCase()}
-                </div>
-                <div className="member-info">
-                  <div className="member-name">{member.username}</div>
-                  {member.role === 'admin' && (
-                    <span className="badge badge-admin">管理员</span>
+        <div className="sidebar-panel">
+          <div className="members-section">
+            <h3>在线成员 ({roomMembers.length})</h3>
+            <div className="member-list">
+              {roomMembers.map((member) => (
+                <div key={member.id} className="member-item">
+                  <div className="member-avatar">
+                    {member.username.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="member-info">
+                    <div className="member-name">{member.username}</div>
+                    {member.role === 'admin' && (
+                      <span className="badge badge-admin">管理员</span>
+                    )}
+                  </div>
+                  {member.id === currentRoom.creatorId && (
+                    <span className="badge badge-creator">房主</span>
                   )}
                 </div>
-                {member.id === currentRoom.creatorId && (
-                  <span className="badge badge-creator">房主</span>
-                )}
-              </div>
-            ))}
+              ))}
+            </div>
+          </div>
+
+          <div className="problems-section">
+            <h3>题目列表</h3>
+            <div className="room-problem-list">
+              {problemsLoading ? (
+                <div className="loading-text">加载中...</div>
+              ) : problems.length === 0 ? (
+                <div className="empty-text">暂无题目</div>
+              ) : (
+                problems.slice(0, 10).map((problem) => (
+                  <div
+                    key={problem.id}
+                    className="room-problem-item"
+                    onClick={() => handleProblemClick(problem.id)}
+                  >
+                    <span className="problem-id">#{problem.id}</span>
+                    <span className="problem-title-text">{problem.title}</span>
+                    <span className={`problem-difficulty ${getDifficultyColor(problem.difficulty)}`}>
+                      {problem.difficulty}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+            {problems.length > 10 && (
+              <button
+                className="btn btn-sm btn-block"
+                onClick={() => navigate('/problems')}
+                style={{ marginTop: '10px' }}
+              >
+                查看全部题目
+              </button>
+            )}
           </div>
         </div>
 
