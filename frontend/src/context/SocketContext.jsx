@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 
@@ -14,86 +14,94 @@ export const useSocket = () => {
 
 export const SocketProvider = ({ children }) => {
   const { user } = useAuth();
-  const [socket, setSocket] = useState(null);
+  const socketRef = useRef(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [connectError, setConnectError] = useState(null);
   const [currentRoom, setCurrentRoom] = useState(null);
   const [roomMembers, setRoomMembers] = useState([]);
   const [roomMessages, setRoomMessages] = useState([]);
   const [globalSolvedFeed, setGlobalSolvedFeed] = useState([]);
 
-  const connectSocket = useCallback(() => {
+  const setupSocketListeners = useCallback((socket) => {
     const token = localStorage.getItem('token');
-    if (!token || socket) return;
 
-    const newSocket = io('/', {
-      transports: ['websocket', 'polling'],
-      autoConnect: true
-    });
-
-    newSocket.on('connect', () => {
-      console.log('Socket connected:', newSocket.id);
+    socket.on('connect', () => {
+      console.log('✅ Socket connected:', socket.id);
       setIsConnected(true);
-      newSocket.emit('authenticate', { token });
+      setConnectError(null);
+      if (token) {
+        socket.emit('authenticate', { token });
+      }
     });
 
-    newSocket.on('disconnect', () => {
-      console.log('Socket disconnected');
+    socket.on('disconnect', () => {
+      console.log('❌ Socket disconnected');
       setIsConnected(false);
     });
 
-    newSocket.on('authenticated', (data) => {
-      console.log('Socket authenticated');
+    socket.on('connect_error', (error) => {
+      console.error('🔌 Socket connect error:', error.message);
+      setConnectError(error.message);
+      setIsConnected(false);
     });
 
-    newSocket.on('auth_error', (data) => {
-      console.error('Socket auth error:', data.message);
+    socket.on('authenticated', (data) => {
+      console.log('🔐 Socket authenticated');
     });
 
-    newSocket.on('room_created', (data) => {
+    socket.on('auth_error', (data) => {
+      console.error('🔐 Socket auth error:', data.message);
+    });
+
+    socket.on('room_created', (data) => {
+      console.log('🏠 Room created:', data);
+      setCurrentRoom(data);
+      setRoomMembers(data.members || []);
+      setRoomMessages([]);
+    });
+
+    socket.on('room_joined', (data) => {
+      console.log('🏠 Room joined:', data);
       setCurrentRoom(data);
       setRoomMembers(data.members || []);
     });
 
-    newSocket.on('room_joined', (data) => {
-      setCurrentRoom(data);
-      setRoomMembers(data.members || []);
-    });
-
-    newSocket.on('room_left', (data) => {
+    socket.on('room_left', (data) => {
+      console.log('🚪 Room left:', data.roomCode);
       setCurrentRoom(null);
       setRoomMembers([]);
       setRoomMessages([]);
     });
 
-    newSocket.on('room_error', (data) => {
-      console.error('Room error:', data.message);
+    socket.on('room_error', (data) => {
+      console.error('🏠 Room error:', data.message);
       alert(data.message);
     });
 
-    newSocket.on('member_list', (data) => {
+    socket.on('member_list', (data) => {
       setRoomMembers(data.members || []);
     });
 
-    newSocket.on('member_joined', (data) => {
+    socket.on('member_joined', (data) => {
       setRoomMembers(prev => {
         if (prev.find(m => m.id === data.user.id)) return prev;
         return [...prev, data.user];
       });
     });
 
-    newSocket.on('member_left', (data) => {
+    socket.on('member_left', (data) => {
       setRoomMembers(prev => prev.filter(m => m.id !== data.user.id));
     });
 
-    newSocket.on('room_history', (data) => {
+    socket.on('room_history', (data) => {
       setRoomMessages(data.messages || []);
     });
 
-    newSocket.on('new_message', (message) => {
+    socket.on('new_message', (message) => {
       setRoomMessages(prev => [...prev, message]);
     });
 
-    newSocket.on('room_solved', (data) => {
+    socket.on('room_solved', (data) => {
       setRoomMessages(prev => [...prev, {
         id: Date.now(),
         type: 'solved',
@@ -103,82 +111,110 @@ export const SocketProvider = ({ children }) => {
       }]);
     });
 
-    newSocket.on('global_solved', (data) => {
+    socket.on('global_solved', (data) => {
       setGlobalSolvedFeed(prev => [data, ...prev].slice(0, 20));
     });
 
-    newSocket.on('submission_updated', (data) => {
+    socket.on('submission_updated', (data) => {
       const event = new CustomEvent('submission_updated', { detail: data });
       window.dispatchEvent(event);
     });
 
-    newSocket.on('rankings_updated', () => {
+    socket.on('rankings_updated', () => {
       const event = new CustomEvent('rankings_updated');
       window.dispatchEvent(event);
     });
+  }, []);
 
-    setSocket(newSocket);
-    return newSocket;
-  }, [user, socket]);
+  const connectSocket = useCallback(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    if (socketRef.current) return;
+
+    console.log('🔌 Connecting socket...');
+
+    const newSocket = io('/', {
+      transports: ['websocket', 'polling'],
+      autoConnect: true,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000
+    });
+
+    setupSocketListeners(newSocket);
+    socketRef.current = newSocket;
+  }, [setupSocketListeners]);
 
   const disconnectSocket = useCallback(() => {
-    if (socket) {
-      socket.disconnect();
-      setSocket(null);
+    if (socketRef.current) {
+      console.log('🔌 Disconnecting socket...');
+      socketRef.current.disconnect();
+      socketRef.current = null;
       setIsConnected(false);
+      setConnectError(null);
       setCurrentRoom(null);
       setRoomMembers([]);
       setRoomMessages([]);
     }
-  }, [socket]);
+  }, []);
 
   const createRoom = useCallback((name) => {
-    if (socket) {
-      socket.emit('create_room', { name });
+    if (socketRef.current && isConnected) {
+      console.log('🏠 Creating room:', name);
+      socketRef.current.emit('create_room', { name });
+    } else {
+      console.warn('⚠️ Socket not connected, cannot create room');
     }
-  }, [socket]);
+  }, [isConnected]);
 
   const joinRoom = useCallback((roomCode) => {
-    if (socket) {
-      socket.emit('join_room', { roomCode });
+    if (socketRef.current && isConnected) {
+      console.log('🚪 Joining room:', roomCode);
+      socketRef.current.emit('join_room', { roomCode });
+    } else {
+      console.warn('⚠️ Socket not connected, cannot join room');
     }
-  }, [socket]);
+  }, [isConnected]);
 
   const leaveRoom = useCallback((roomCode) => {
-    if (socket && currentRoom) {
-      socket.emit('leave_room', { roomCode: roomCode || currentRoom.roomCode });
+    if (socketRef.current && currentRoom) {
+      const code = roomCode || currentRoom.roomCode;
+      console.log('🚪 Leaving room:', code);
+      socketRef.current.emit('leave_room', { roomCode: code });
       setCurrentRoom(null);
       setRoomMembers([]);
       setRoomMessages([]);
     }
-  }, [socket, currentRoom]);
+  }, [currentRoom]);
 
   const sendMessage = useCallback((content) => {
-    if (socket && currentRoom) {
-      socket.emit('send_message', { roomCode: currentRoom.roomCode, content });
+    if (socketRef.current && currentRoom) {
+      socketRef.current.emit('send_message', { roomCode: currentRoom.roomCode, content });
     }
-  }, [socket, currentRoom]);
+  }, [currentRoom]);
 
   useEffect(() => {
-    if (user && !socket) {
+    if (user) {
       connectSocket();
-    }
-    if (!user && socket) {
+    } else {
       disconnectSocket();
     }
-  }, [user, socket, connectSocket, disconnectSocket]);
+  }, [user, connectSocket, disconnectSocket]);
 
   useEffect(() => {
     return () => {
-      if (socket) {
-        socket.disconnect();
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
       }
     };
   }, []);
 
   const value = {
-    socket,
+    socket: socketRef.current,
     isConnected,
+    connectError,
     currentRoom,
     roomMembers,
     roomMessages,
