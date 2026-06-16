@@ -78,36 +78,33 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     const { user_id, problem_id, limit = 50, offset = 0 } = req.query;
 
-    let query = `
-      SELECT s.id, s.user_id, s.problem_id, s.language, s.status, s.time_used, s.memory_used, s.created_at,
-             u.username, p.title as problem_title
-      FROM submissions s
-      LEFT JOIN users u ON s.user_id = u.id
-      LEFT JOIN problems p ON s.problem_id = p.id
-    `;
+    let query = 'SELECT s.id, s.user_id, s.problem_id, s.language, s.status, s.time_used, s.memory_used, s.created_at, u.username, p.title as problem_title FROM submissions s LEFT JOIN users u ON s.user_id = u.id LEFT JOIN problems p ON s.problem_id = p.id';
     const conditions = [];
     const values = [];
 
     if (user_id) {
       conditions.push('s.user_id = ?');
-      values.push(user_id);
+      values.push(parseInt(user_id));
     }
     if (problem_id) {
       conditions.push('s.problem_id = ?');
-      values.push(problem_id);
+      values.push(parseInt(problem_id));
     }
 
     if (conditions.length > 0) {
       query += ' WHERE ' + conditions.join(' AND ');
     }
 
-    query += ' ORDER BY s.id DESC LIMIT ? OFFSET ?';
-    values.push(parseInt(limit), parseInt(offset));
+    const safeLimit = Math.min(Math.max(parseInt(limit) || 50, 1), 200);
+    const safeOffset = Math.max(parseInt(offset) || 0, 0);
+    query += ` ORDER BY s.id DESC LIMIT ${safeLimit} OFFSET ${safeOffset}`;
 
-    const [submissions] = await pool.execute(query, values);
+    const [submissions] = values.length > 0
+      ? await pool.execute(query, values)
+      : await pool.query(query);
     res.json(submissions);
   } catch (error) {
-    console.error('Get submissions error:', error);
+    console.error('Get submissions error:', error.message, error.sql || '');
     res.status(500).json({ error: 'Failed to get submissions' });
   }
 });

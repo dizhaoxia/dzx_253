@@ -1,7 +1,33 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { problemAPI, submissionAPI } from '../api';
 import { useAuth } from '../context/AuthContext';
+
+const statusToClass = (status) => {
+  const map = {
+    'Accepted': 'accepted',
+    'Wrong Answer': 'wrong-answer',
+    'Pending': 'pending',
+    'Judging': 'judging',
+    'Runtime Error': 'runtime-error',
+    'Judge Error': 'judge-error',
+    'Time Limit Exceeded': 'time-limit-exceeded'
+  };
+  return map[status] || '';
+};
+
+const statusToIcon = (status) => {
+  const map = {
+    'Accepted': '✅',
+    'Wrong Answer': '❌',
+    'Pending': '⏳',
+    'Judging': '🔄',
+    'Runtime Error': '💥',
+    'Judge Error': '⚠️',
+    'Time Limit Exceeded': '⏰'
+  };
+  return map[status] || '❓';
+};
 
 const ProblemDetail = () => {
   const { id } = useParams();
@@ -14,6 +40,8 @@ const ProblemDetail = () => {
   const [submitting, setSubmitting] = useState(false);
   const [lastSubmission, setLastSubmission] = useState(null);
   const [pollingId, setPollingId] = useState(null);
+  const [judgeResult, setJudgeResult] = useState(null);
+  const pollingRef = useRef(null);
 
   useEffect(() => {
     const fetchProblem = async () => {
@@ -44,21 +72,31 @@ const ProblemDetail = () => {
 
   useEffect(() => {
     if (pollingId) {
-      const interval = setInterval(async () => {
+      const poll = async () => {
         try {
           const response = await submissionAPI.getById(pollingId);
-          setLastSubmission(response.data);
-          if (response.data.status !== 'Pending' && response.data.status !== 'Judging') {
-            clearInterval(interval);
+          const sub = response.data;
+          setLastSubmission(sub);
+          if (sub.status !== 'Pending' && sub.status !== 'Judging') {
+            setJudgeResult(sub);
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
             setPollingId(null);
           }
         } catch (error) {
           console.error('Polling error:', error);
-          clearInterval(interval);
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
           setPollingId(null);
         }
-      }, 1000);
-      return () => clearInterval(interval);
+      };
+      pollingRef.current = setInterval(poll, 1500);
+      return () => {
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+      };
     }
   }, [pollingId]);
 
@@ -74,6 +112,7 @@ const ProblemDetail = () => {
     }
 
     setSubmitting(true);
+    setJudgeResult(null);
     try {
       const response = await submissionAPI.submit({
         problem_id: problem.id,
@@ -170,24 +209,51 @@ const ProblemDetail = () => {
               <button 
                 className="btn btn-primary" 
                 onClick={handleSubmit}
-                disabled={submitting}
+                disabled={submitting || !!pollingId}
               >
-                {submitting ? '提交中...' : '提交代码'}
+                {submitting ? '提交中...' : pollingId ? '判题中...' : '提交代码'}
               </button>
               
-              {lastSubmission && (
-                <span className={`status-badge status-${lastSubmission.status}`}>
+              {lastSubmission && !pollingId && !judgeResult && (
+                <span className={`status-badge status-${statusToClass(lastSubmission.status)}`}>
                   {lastSubmission.status}
                   {lastSubmission.time_used > 0 && ` (${lastSubmission.time_used}ms)`}
                 </span>
               )}
             </div>
 
-            {lastSubmission && (lastSubmission.status === 'Pending' || lastSubmission.status === 'Judging') && (
-              <p style={{ marginTop: '1rem', color: '#666' }}>
-                <span className="spinner" style={{ width: '20px', height: '20px', marginRight: '0.5rem' }}></span>
-                正在判题中，请稍候...
-              </p>
+            {pollingId && (
+              <div style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div className="spinner" style={{ width: '20px', height: '20px' }}></div>
+                <span style={{ color: '#666' }}>正在判题中，请稍候...</span>
+              </div>
+            )}
+
+            {judgeResult && (
+              <div className={`judge-result judge-result-${statusToClass(judgeResult.status)}`} style={{
+                marginTop: '1rem',
+                padding: '1.25rem',
+                borderRadius: '10px',
+                background: judgeResult.status === 'Accepted' ? '#d4edda' : '#f8d7da',
+                border: judgeResult.status === 'Accepted' ? '2px solid #28a745' : '2px solid #dc3545',
+                textAlign: 'center'
+              }}>
+                <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>
+                  {statusToIcon(judgeResult.status)}
+                </div>
+                <div style={{ 
+                  fontSize: '1.5rem', 
+                  fontWeight: 'bold',
+                  color: judgeResult.status === 'Accepted' ? '#155724' : '#721c24'
+                }}>
+                  {judgeResult.status}
+                </div>
+                {judgeResult.time_used > 0 && (
+                  <div style={{ marginTop: '0.5rem', color: '#666', fontSize: '0.9rem' }}>
+                    耗时: {judgeResult.time_used}ms
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>

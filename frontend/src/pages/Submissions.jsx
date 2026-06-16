@@ -2,6 +2,19 @@ import { useState, useEffect } from 'react';
 import { submissionAPI } from '../api';
 import { useAuth } from '../context/AuthContext';
 
+const statusToClass = (status) => {
+  const map = {
+    'Accepted': 'accepted',
+    'Wrong Answer': 'wrong-answer',
+    'Pending': 'pending',
+    'Judging': 'judging',
+    'Runtime Error': 'runtime-error',
+    'Judge Error': 'judge-error',
+    'Time Limit Exceeded': 'time-limit-exceeded'
+  };
+  return map[status] || '';
+};
+
 const Submissions = () => {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -55,7 +68,7 @@ const Submissions = () => {
                 <td>{sub.problem_title}</td>
                 <td>{sub.language === 'cpp' ? 'C++' : 'Python'}</td>
                 <td>
-                  <span className={`status-badge status-${sub.status}`}>
+                  <span className={`status-badge status-${statusToClass(sub.status)}`}>
                     {sub.status}
                   </span>
                 </td>

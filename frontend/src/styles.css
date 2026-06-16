@@ -286,28 +286,29 @@ body {
   font-weight: 600;
 }
 
-.status-Accepted {
+.status-accepted {
   background: #d4edda;
   color: #155724;
 }
 
-.status-Wrong\ Answer {
+.status-wrong-answer {
   background: #f8d7da;
   color: #721c24;
 }
 
-.status-Pending {
+.status-pending {
   background: #fff3cd;
   color: #856404;
 }
 
-.status-Judging {
+.status-judging {
   background: #cce5ff;
   color: #004085;
 }
 
-.status-Runtime\ Error,
-.status-Judge\ Error {
+.status-runtime-error,
+.status-judge-error,
+.status-time-limit-exceeded {
   background: #f8d7da;
   color: #721c24;
 }
