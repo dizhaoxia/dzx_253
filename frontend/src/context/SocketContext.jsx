@@ -61,12 +61,49 @@ export const SocketProvider = ({ children }) => {
       setCurrentRoom(data);
       setRoomMembers(data.members || []);
       setRoomMessages([]);
+      if (data.status === 'running' && data.problems) {
+        setCompetitionProblems(data.problems || []);
+        setCompetitionRankings(data.rankings || []);
+        setCompetitionStatus({
+          status: 'running',
+          start_time: data.start_time,
+          end_time: data.end_time,
+          duration_minutes: data.duration_minutes
+        });
+      } else {
+        setCompetitionProblems([]);
+        setCompetitionRankings([]);
+        setCompetitionStatus(null);
+      }
     });
 
     socket.on('room_joined', (data) => {
       console.log('🏠 Room joined:', data);
       setCurrentRoom(data);
       setRoomMembers(data.members || []);
+      if (data.status === 'running' && data.problems) {
+        setCompetitionProblems(data.problems || []);
+        setCompetitionRankings(data.rankings || []);
+        setCompetitionStatus({
+          status: 'running',
+          start_time: data.start_time,
+          end_time: data.end_time,
+          duration_minutes: data.duration_minutes
+        });
+      } else if (data.status === 'ended') {
+        setCompetitionRankings(data.rankings || []);
+        setCompetitionStatus({
+          status: 'ended',
+          end_time: data.end_time
+        });
+        if (data.problems) {
+          setCompetitionProblems(data.problems);
+        }
+      } else {
+        setCompetitionProblems([]);
+        setCompetitionRankings([]);
+        setCompetitionStatus(null);
+      }
     });
 
     socket.on('room_left', (data) => {
@@ -144,7 +181,8 @@ export const SocketProvider = ({ children }) => {
         start_time: data.start_time,
         end_time: data.end_time,
         duration_minutes: data.duration_minutes,
-        rankings: data.members || []
+        rankings: data.members || [],
+        problems: data.problems || []
       } : null);
 
       setRoomMessages(prev => [...prev, {
@@ -167,7 +205,8 @@ export const SocketProvider = ({ children }) => {
         status: 'ended',
         end_time: data.end_time,
         is_locked: 1,
-        rankings: data.rankings || []
+        rankings: data.rankings || [],
+        problems: prev.problems || []
       } : null);
 
       setRoomMessages(prev => [...prev, {

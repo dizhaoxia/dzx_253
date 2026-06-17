@@ -70,7 +70,16 @@ class SocketManager {
             roomId: result.insertId,
             roomCode,
             name: name || `${socket.user.username}'s Room`,
-            members
+            creatorId: socket.user.id,
+            status: 'idle',
+            start_time: null,
+            end_time: null,
+            duration_minutes: 60,
+            is_locked: 0,
+            isOwner: true,
+            members,
+            problems: [],
+            rankings: []
           });
 
           this.io.to(roomCode).emit('member_list', { members });
@@ -105,6 +114,7 @@ class SocketManager {
           }
 
           const room = rooms[0];
+          const isOwner = room.creator_id === socket.user.id || socket.user.role === 'admin';
 
           try {
             await pool.execute(
@@ -122,12 +132,49 @@ class SocketManager {
 
           const members = await this.getRoomMembers(room.id);
 
+          let competitionProblems = [];
+          let rankings = [];
+          if (room.status === 'running') {
+            const [problems] = await pool.execute(`
+              SELECT id, title, description, input_format, output_format,
+                     time_limit, memory_limit, sample_input, sample_output,
+                     test_case_count, difficulty, created_at
+              FROM problems
+              ORDER BY id ASC
+            `);
+            competitionProblems = problems;
+
+            const [rankRes] = await pool.execute(`
+              SELECT 
+                rm.user_id,
+                u.username,
+                rm.solved_count,
+                rm.total_time,
+                rm.competition_score,
+                rm.last_ac_time
+              FROM room_members rm
+              LEFT JOIN users u ON rm.user_id = u.id
+              WHERE rm.room_id = ?
+              ORDER BY rm.competition_score DESC, rm.last_ac_time ASC
+            `, [room.id]);
+            rankings = rankRes;
+          }
+
           socket.emit('room_joined', {
             roomId: room.id,
             roomCode,
             name: room.name,
             creatorName: room.creator_name,
-            members
+            creatorId: room.creator_id,
+            status: room.status || 'idle',
+            start_time: room.start_time,
+            end_time: room.end_time,
+            duration_minutes: room.duration_minutes || 60,
+            is_locked: room.is_locked || 0,
+            isOwner,
+            members,
+            problems: competitionProblems,
+            rankings
           });
 
           this.io.to(roomCode).emit('member_joined', {

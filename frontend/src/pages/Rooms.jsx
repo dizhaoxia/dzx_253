@@ -75,7 +75,6 @@ const Rooms = () => {
   useEffect(() => {
     if (user) {
       loadMyRooms();
-      loadProblems();
     }
   }, [user]);
 
@@ -270,7 +269,9 @@ const Rooms = () => {
 
   const isRoomOwner = useCallback(() => {
     if (!currentRoom || !user) return false;
-    return currentRoom.creatorId === user.id || user.role === 'admin';
+    if (currentRoom.isOwner === true) return true;
+    if (user.role === 'admin') return true;
+    return currentRoom.creatorId === user.id || currentRoom.creator_id === user.id;
   }, [currentRoom, user]);
 
   const getRoomStatus = useCallback(() => {
@@ -295,8 +296,11 @@ const Rooms = () => {
     if (isCompetitionRunning() && competitionProblems.length > 0) {
       return competitionProblems;
     }
-    return problems;
-  }, [isCompetitionRunning, competitionProblems, problems]);
+    if (currentRoom?.problems && currentRoom.problems.length > 0 && isCompetitionRunning()) {
+      return currentRoom.problems;
+    }
+    return [];
+  }, [isCompetitionRunning, competitionProblems, currentRoom]);
 
   const handleStartCompetition = () => {
     if (!isRoomOwner()) return;
@@ -315,62 +319,50 @@ const Rooms = () => {
   };
 
   useEffect(() => {
-    if (isCompetitionRunning() && currentRoom?.end_time) {
+    let endTime = null;
+
+    if (isCompetitionRunning()) {
+      if (currentRoom?.end_time) {
+        endTime = new Date(currentRoom.end_time).getTime();
+      } else if (competitionStatus?.end_time) {
+        endTime = new Date(competitionStatus.end_time).getTime();
+      }
+    }
+
+    if (endTime && endTime > Date.now()) {
       const updateTimer = () => {
-        const endTime = new Date(currentRoom.end_time).getTime();
         const now = Date.now();
         const remaining = Math.max(0, Math.floor((endTime - now) / 1000));
         setTimeRemaining(remaining);
+
         if (remaining <= 0) {
           if (timerRef.current) {
             clearInterval(timerRef.current);
+            timerRef.current = null;
+          }
+          if (isRoomOwner() && isCompetitionRunning()) {
+            endCompetition(currentRoom?.roomCode);
           }
         }
       };
-      updateTimer();
-      timerRef.current = setInterval(updateTimer, 1000);
-    } else if (competitionStatus?.status === 'running' && competitionStatus?.end_time) {
-      const updateTimer = () => {
-        const endTime = new Date(competitionStatus.end_time).getTime();
-        const now = Date.now();
-        const remaining = Math.max(0, Math.floor((endTime - now) / 1000));
-        setTimeRemaining(remaining);
-        if (remaining <= 0) {
-          if (timerRef.current) {
-            clearInterval(timerRef.current);
-          }
-        }
-      };
+
       updateTimer();
       timerRef.current = setInterval(updateTimer, 1000);
     } else {
+      setTimeRemaining(0);
       if (timerRef.current) {
         clearInterval(timerRef.current);
+        timerRef.current = null;
       }
-      setTimeRemaining(0);
     }
 
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
+        timerRef.current = null;
       }
     };
-  }, [currentRoom, competitionStatus, isCompetitionRunning]);
-
-  useEffect(() => {
-    if (currentRoom?.status === 'running' && currentRoom?.end_time) {
-      const endTime = new Date(currentRoom.end_time).getTime();
-      const checkEnd = () => {
-        if (Date.now() >= endTime) {
-          if (isRoomOwner()) {
-            endCompetition(currentRoom.roomCode);
-          }
-        }
-      };
-      const checkInterval = setInterval(checkEnd, 1000);
-      return () => clearInterval(checkInterval);
-    }
-  }, [currentRoom, isRoomOwner, endCompetition]);
+  }, [currentRoom, competitionStatus, isCompetitionRunning, isRoomOwner, endCompetition]);
 
   if (!currentRoom) {
     return (
@@ -575,13 +567,31 @@ const Rooms = () => {
           )}
 
           <div className="problems-section">
-            <h3>题目列表 {isCompetitionRunning() && <span className="badge" style={{ background: '#667eea', marginLeft: '8px' }}>比赛专用</span>}</h3>
+            <h3>
+              题目列表
+              {isCompetitionRunning() && <span className="badge" style={{ background: '#667eea', marginLeft: '8px' }}>比赛专用</span>}
+              {isCompetitionEnded() && <span className="badge" style={{ background: '#6c757d', marginLeft: '8px' }}>已结束</span>}
+            </h3>
             <div className="room-problem-list">
-              {problemsLoading ? (
-                <div className="loading-text">加载中...</div>
-              ) : getDisplayProblems().length === 0 ? (
-                <div className="empty-text">{isCompetitionRunning() ? '等待比赛开始...' : '暂无题目'}</div>
-              ) : (
+              {!isCompetitionRunning() && !isCompetitionEnded() && (
+                <div className="waiting-competition" style={{
+                  padding: '2rem',
+                  textAlign: 'center',
+                  color: '#666',
+                  background: '#f8f9fa',
+                  borderRadius: '8px'
+                }}>
+                  <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>⏳</div>
+                  <div style={{ fontWeight: '500', marginBottom: '0.25rem' }}>等待比赛开始</div>
+                  <div style={{ fontSize: '0.85rem', color: '#999' }}>
+                    {isRoomOwner() ? '设置时长后点击开始比赛' : '请等待房主开始比赛'}
+                  </div>
+                </div>
+              )}
+              {isCompetitionRunning() && getDisplayProblems().length === 0 && (
+                <div className="loading-text">加载题目中...</div>
+              )}
+              {isCompetitionRunning() && getDisplayProblems().length > 0 && (
                 getDisplayProblems().map((problem) => (
                   <div
                     key={problem.id}
@@ -594,12 +604,57 @@ const Rooms = () => {
                   </div>
                 ))
               )}
+              {isCompetitionEnded() && getDisplayProblems().length > 0 && (
+                getDisplayProblems().map((problem) => (
+                  <div
+                    key={problem.id}
+                    className={`room-problem-item ${selectedProblem?.id === problem.id ? 'selected' : ''}`}
+                    style={{ opacity: 0.7 }}
+                    onClick={() => loadProblemDetail(problem.id)}
+                  >
+                    <span className="problem-id">#{problem.id}</span>
+                    <span className="problem-title-text">{problem.title}</span>
+                    <span className={`problem-difficulty ${getDifficultyColor(problem.difficulty)}`}>{problem.difficulty}</span>
+                  </div>
+                ))
+              )}
+              {isCompetitionEnded() && getDisplayProblems().length === 0 && (
+                <div className="empty-text">比赛已结束</div>
+              )}
             </div>
           </div>
         </div>
 
         <div className="editor-panel">
-          {!selectedProblem ? (
+          {!isCompetitionRunning() && !isCompetitionEnded() ? (
+            <div className="empty-problem">
+              <div className="empty-icon">🏆</div>
+              <h3>等待比赛开始</h3>
+              <p>{isRoomOwner() ? '请设置比赛时长并点击"开始比赛"按钮' : '请等待房主开始比赛'}</p>
+              {isRoomOwner() && (
+                <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                  <select
+                    value={competitionDuration}
+                    onChange={(e) => setCompetitionDuration(parseInt(e.target.value))}
+                    style={{ padding: '0.75rem 1rem', borderRadius: '8px', border: '2px solid #e1e5e9', fontSize: '1rem' }}
+                  >
+                    <option value={30}>30 分钟</option>
+                    <option value={60}>60 分钟</option>
+                    <option value={90}>90 分钟</option>
+                    <option value={120}>120 分钟</option>
+                  </select>
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleStartCompetition}
+                    disabled={!isConnected}
+                    style={{ fontSize: '1.1rem', padding: '0.75rem 2rem' }}
+                  >
+                    🚀 开始比赛
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : !selectedProblem ? (
             <div className="empty-problem">
               <div className="empty-icon">📝</div>
               <h3>请选择一道题目</h3>
