@@ -21,6 +21,9 @@ export const SocketProvider = ({ children }) => {
   const [roomMembers, setRoomMembers] = useState([]);
   const [roomMessages, setRoomMessages] = useState([]);
   const [globalSolvedFeed, setGlobalSolvedFeed] = useState([]);
+  const [competitionStatus, setCompetitionStatus] = useState(null);
+  const [competitionRankings, setCompetitionRankings] = useState([]);
+  const [competitionProblems, setCompetitionProblems] = useState([]);
 
   const setupSocketListeners = useCallback((socket) => {
     const token = localStorage.getItem('token');
@@ -124,6 +127,71 @@ export const SocketProvider = ({ children }) => {
       const event = new CustomEvent('rankings_updated');
       window.dispatchEvent(event);
     });
+
+    socket.on('competition_started', (data) => {
+      console.log('🏆 Competition started:', data);
+      setCompetitionStatus({
+        status: 'running',
+        start_time: data.start_time,
+        end_time: data.end_time,
+        duration_minutes: data.duration_minutes
+      });
+      setCompetitionProblems(data.problems || []);
+      setCompetitionRankings(data.members || []);
+      setCurrentRoom(prev => prev ? {
+        ...prev,
+        status: 'running',
+        start_time: data.start_time,
+        end_time: data.end_time,
+        duration_minutes: data.duration_minutes,
+        rankings: data.members || []
+      } : null);
+
+      setRoomMessages(prev => [...prev, {
+        id: Date.now(),
+        type: 'system',
+        content: '🎉 比赛开始！祝各位选手好运！',
+        created_at: new Date().toISOString()
+      }]);
+    });
+
+    socket.on('competition_ended', (data) => {
+      console.log('🏆 Competition ended:', data);
+      setCompetitionStatus({
+        status: 'ended',
+        end_time: data.end_time
+      });
+      setCompetitionRankings(data.rankings || []);
+      setCurrentRoom(prev => prev ? {
+        ...prev,
+        status: 'ended',
+        end_time: data.end_time,
+        is_locked: 1,
+        rankings: data.rankings || []
+      } : null);
+
+      setRoomMessages(prev => [...prev, {
+        id: Date.now(),
+        type: 'system',
+        content: '🏁 比赛结束！排名已更新。',
+        created_at: new Date().toISOString()
+      }]);
+    });
+
+    socket.on('competition_rankings_updated', (data) => {
+      console.log('🏆 Rankings updated:', data);
+      setCompetitionRankings(data.rankings || []);
+      setCurrentRoom(prev => prev ? {
+        ...prev,
+        rankings: data.rankings || []
+      } : null);
+    });
+
+    socket.on('plagiarism_alert', (data) => {
+      console.log('⚠️ Plagiarism alert:', data);
+      const event = new CustomEvent('plagiarism_alert', { detail: data });
+      window.dispatchEvent(event);
+    });
   }, []);
 
   const connectSocket = useCallback(() => {
@@ -185,14 +253,39 @@ export const SocketProvider = ({ children }) => {
       setCurrentRoom(null);
       setRoomMembers([]);
       setRoomMessages([]);
+      resetCompetitionState();
     }
-  }, [currentRoom]);
+  }, [currentRoom, resetCompetitionState]);
 
   const sendMessage = useCallback((content) => {
     if (socketRef.current && currentRoom) {
       socketRef.current.emit('send_message', { roomCode: currentRoom.roomCode, content });
     }
   }, [currentRoom]);
+
+  const startCompetition = useCallback((roomCode, durationMinutes = 60) => {
+    if (socketRef.current && isConnected) {
+      console.log('🏆 Starting competition:', roomCode, durationMinutes);
+      socketRef.current.emit('start_competition', { roomCode, duration_minutes: durationMinutes });
+    } else {
+      console.warn('⚠️ Socket not connected, cannot start competition');
+    }
+  }, [isConnected]);
+
+  const endCompetition = useCallback((roomCode) => {
+    if (socketRef.current && isConnected) {
+      console.log('🏆 Ending competition:', roomCode);
+      socketRef.current.emit('end_competition', { roomCode });
+    } else {
+      console.warn('⚠️ Socket not connected, cannot end competition');
+    }
+  }, [isConnected]);
+
+  const resetCompetitionState = useCallback(() => {
+    setCompetitionStatus(null);
+    setCompetitionRankings([]);
+    setCompetitionProblems([]);
+  }, []);
 
   useEffect(() => {
     if (user) {
@@ -219,12 +312,18 @@ export const SocketProvider = ({ children }) => {
     roomMembers,
     roomMessages,
     globalSolvedFeed,
+    competitionStatus,
+    competitionRankings,
+    competitionProblems,
     connectSocket,
     disconnectSocket,
     createRoom,
     joinRoom,
     leaveRoom,
-    sendMessage
+    sendMessage,
+    startCompetition,
+    endCompetition,
+    resetCompetitionState
   };
 
   return (

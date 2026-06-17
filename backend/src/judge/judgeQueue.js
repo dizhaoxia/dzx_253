@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const { pool } = require('../config/db');
 const { getSocketManager } = require('../realTime/socketManager');
 const { delCache } = require('../config/redis');
+const { plagiarismDetector } = require('../services/plagiarismDetector');
 
 const JUDGE_STATUS = {
   AC: 'AC',
@@ -526,6 +527,80 @@ class JudgeQueue {
 
           await delCache('rankings:all');
           socketManager.broadcastToAll('rankings_updated', {});
+
+          plagiarismDetector.processAcceptedSubmission(
+            id,
+            user_id,
+            problem_id,
+            code,
+            language
+          ).catch(err => {
+            console.error(`[Plagiarism #${id}] Error:`, err.message);
+          });
+
+          const [submissionRoom] = await pool.execute(
+            'SELECT room_id, is_competition_submission FROM submissions WHERE id = ?',
+            [id]
+          );
+
+          if (submissionRoom.length > 0 && submissionRoom[0].room_id && submissionRoom[0].is_competition_submission) {
+            const roomId = submissionRoom[0].room_id;
+            const [rooms] = await pool.execute(
+              'SELECT id, room_code, status FROM rooms WHERE id = ?',
+              [roomId]
+            );
+
+            if (rooms.length > 0 && rooms[0].status === 'running') {
+              const [memberStats] = await pool.execute(`
+                SELECT 
+                  COUNT(DISTINCT CASE WHEN s.status = 'AC' THEN s.problem_id END) as solved_count,
+                  COALESCE(SUM(CASE WHEN s.status = 'AC' THEN 
+                    TIMESTAMPDIFF(SECOND, r.start_time, s.created_at)
+                  END), 0) as total_time,
+                  MAX(CASE WHEN s.status = 'AC' THEN s.created_at END) as last_ac_time
+                FROM submissions s
+                INNER JOIN rooms r ON s.room_id = r.id
+                WHERE s.user_id = ? 
+                  AND s.room_id = ? 
+                  AND s.is_competition_submission = 1
+                  AND s.created_at BETWEEN r.start_time AND r.end_time
+              `, [user_id, roomId]);
+
+              if (memberStats.length > 0) {
+                const stats = memberStats[0];
+                const solvedCount = stats.solved_count || 0;
+                const totalTime = stats.total_time || 0;
+                const lastAcTime = stats.last_ac_time;
+
+                const score = solvedCount * 1000 - Math.floor(totalTime / 60);
+
+                await pool.execute(`
+                  UPDATE room_members 
+                  SET solved_count = ?, total_time = ?, last_ac_time = ?, competition_score = ?
+                  WHERE room_id = ? AND user_id = ?
+                `, [solvedCount, totalTime, lastAcTime, Math.max(0, score), roomId, user_id]);
+
+                const [rankings] = await pool.execute(`
+                  SELECT 
+                    rm.user_id,
+                    u.username,
+                    rm.solved_count,
+                    rm.total_time,
+                    rm.competition_score,
+                    rm.last_ac_time
+                  FROM room_members rm
+                  LEFT JOIN users u ON rm.user_id = u.id
+                  WHERE rm.room_id = ?
+                  ORDER BY rm.competition_score DESC, rm.last_ac_time ASC
+                `, [roomId]);
+
+                socketManager.broadcastToRoom(rooms[0].room_code, 'competition_rankings_updated', {
+                  room_code: rooms[0].room_code,
+                  rankings
+                });
+              }
+            }
+          }
         }
       }
 

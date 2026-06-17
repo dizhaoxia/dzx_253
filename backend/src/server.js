@@ -11,6 +11,7 @@ const problemRoutes = require('./routes/problems');
 const submissionRoutes = require('./routes/submissions');
 const rankingRoutes = require('./routes/rankings');
 const roomRoutes = require('./routes/rooms');
+const alertRoutes = require('./routes/alerts');
 
 const app = express();
 const PORT = process.env.PORT || 3434;
@@ -23,6 +24,7 @@ app.use('/api/problems', problemRoutes);
 app.use('/api/submissions', submissionRoutes);
 app.use('/api/rankings', rankingRoutes);
 app.use('/api/rooms', roomRoutes);
+app.use('/api/alerts', alertRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'OJ Platform Backend is running' });

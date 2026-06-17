@@ -69,7 +69,18 @@ export const roomAPI = {
   getByCode: (roomCode) => api.get(`/rooms/${roomCode}`),
   create: (data) => api.post('/rooms', data),
   join: (roomCode) => api.post(`/rooms/${roomCode}/join`),
-  leave: (roomCode) => api.post(`/rooms/${roomCode}/leave`)
+  leave: (roomCode) => api.post(`/rooms/${roomCode}/leave`),
+  startCompetition: (roomCode) => api.post(`/rooms/${roomCode}/start`),
+  endCompetition: (roomCode) => api.post(`/rooms/${roomCode}/end`),
+  getRankings: (roomCode) => api.get(`/rooms/${roomCode}/rankings`)
+};
+
+export const alertAPI = {
+  getStats: () => api.get('/alerts/stats'),
+  getAll: (params) => api.get('/alerts', { params }),
+  getById: (id) => api.get(`/alerts/${id}`),
+  updateStatus: (id, data) => api.put(`/alerts/${id}/status`, data),
+  batchUpdateStatus: (data) => api.post('/alerts/batch-status', data)
 };
 
 export default api;

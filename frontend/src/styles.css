@@ -1593,3 +1593,139 @@ body {
     transform: translateY(0);
   }
 }
+
+.badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: white;
+  background: #6c757d;
+}
+
+.badge-admin {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+.badge-creator {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+}
+
+.rankings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ranking-item {
+  transition: all 0.3s ease;
+}
+
+.ranking-item:hover {
+  transform: translateX(4px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+@keyframes countdown-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.timer-urgent {
+  animation: countdown-pulse 1s ease-in-out infinite;
+}
+
+.code-editor:disabled,
+.code-editor[readonly] {
+  background: #f5f5f5;
+  color: #666;
+  cursor: not-allowed;
+  opacity: 0.8;
+}
+
+input[type="radio"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.competition-notification {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  padding: 1rem 1.5rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(102, 126, 234, 0.4);
+  z-index: 1000;
+  animation: slideInRight 0.3s ease-out;
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.plagiarism-alert {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  padding: 1rem 1.5rem;
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: white;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(245, 87, 108, 0.4);
+  z-index: 1000;
+  animation: slideInRight 0.3s ease-out;
+  max-width: 400px;
+}
+
+.room-header .badge {
+  vertical-align: middle;
+}
+
+.competition-duration-select {
+  padding: 0.5rem;
+  border: 2px solid #e1e5e9;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  background: white;
+  transition: border-color 0.3s;
+}
+
+.competition-duration-select:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.problems-section h3 .badge {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.4rem;
+}
+
+.ranking-item:first-child {
+  background: linear-gradient(135deg, #fff9c4 0%, #ffd54f 100%) !important;
+  border-color: #ffb300 !important;
+}
+
+.ranking-item:nth-child(2) {
+  background: linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 100%) !important;
+  border-color: #bdbdbd !important;
+}
+
+.ranking-item:nth-child(3) {
+  background: linear-gradient(135deg, #ffe0b2 0%, #ffcc80 100%) !important;
+  border-color: #ff9800 !important;
+}

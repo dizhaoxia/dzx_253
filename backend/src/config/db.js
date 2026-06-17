@@ -155,6 +155,70 @@ const initDatabase = async () => {
       )
     `);
 
+    await pool.execute(`
+      CREATE TABLE IF NOT EXISTS code_fingerprints (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        submission_id INT NOT NULL,
+        user_id INT NOT NULL,
+        problem_id INT NOT NULL,
+        fingerprint VARCHAR(64) NOT NULL,
+        language VARCHAR(20) NOT NULL,
+        code_length INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_submission_fingerprint (submission_id),
+        INDEX idx_problem_fingerprint (problem_id, fingerprint)
+      )
+    `);
+
+    await pool.execute(`
+      CREATE TABLE IF NOT EXISTS similarity_alerts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        submission_id INT NOT NULL,
+        user_id INT NOT NULL,
+        problem_id INT NOT NULL,
+        matched_submission_id INT NOT NULL,
+        matched_user_id INT NOT NULL,
+        similarity_score DECIMAL(5,2) NOT NULL,
+        hamming_distance INT NOT NULL,
+        status VARCHAR(20) DEFAULT 'pending',
+        reviewed_by INT,
+        reviewed_at TIMESTAMP NULL,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE,
+        FOREIGN KEY (matched_submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+        FOREIGN KEY (matched_user_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_status (status),
+        INDEX idx_problem_user (problem_id, user_id)
+      )
+    `);
+
+    await addColumnsIfNotExist('rooms', [
+      'status VARCHAR(20) DEFAULT \'idle\'',
+      'start_time TIMESTAMP NULL',
+      'end_time TIMESTAMP NULL',
+      'duration_minutes INT DEFAULT 60',
+      'is_locked TINYINT(1) DEFAULT 0'
+    ]);
+
+    await addColumnsIfNotExist('room_members', [
+      'solved_count INT DEFAULT 0',
+      'total_time INT DEFAULT 0',
+      'last_ac_time TIMESTAMP NULL',
+      'competition_score INT DEFAULT 0'
+    ]);
+
+    await addColumnsIfNotExist('submissions', [
+      'room_id INT NULL',
+      'is_competition_submission TINYINT(1) DEFAULT 0',
+      'FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE SET NULL'
+    ]);
+
     console.log('Database initialized successfully');
   } catch (error) {
     console.error('Database initialization failed:', error);

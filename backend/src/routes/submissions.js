@@ -11,7 +11,7 @@ const getDisplayStatus = (status) => {
 
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { problem_id, code, language } = req.body;
+    const { problem_id, code, language, room_id } = req.body;
     const user_id = req.user.id;
 
     if (!problem_id || !code || !language) {
@@ -27,9 +27,44 @@ router.post('/', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Problem not found' });
     }
 
+    let isCompetitionSubmission = 0;
+    let finalRoomId = room_id || null;
+
+    if (room_id) {
+      const [rooms] = await pool.execute(
+        'SELECT id, status, is_locked FROM rooms WHERE id = ?',
+        [room_id]
+      );
+
+      if (rooms.length === 0) {
+        return res.status(404).json({ error: 'Room not found' });
+      }
+
+      const room = rooms[0];
+
+      if (room.is_locked) {
+        return res.status(403).json({ error: 'Room is locked, submissions are disabled' });
+      }
+
+      if (room.status === 'running') {
+        const [member] = await pool.execute(
+          'SELECT id FROM room_members WHERE room_id = ? AND user_id = ?',
+          [room_id, user_id]
+        );
+
+        if (member.length === 0) {
+          return res.status(403).json({ error: 'You are not a member of this room' });
+        }
+
+        isCompetitionSubmission = 1;
+      } else if (room.status === 'ended') {
+        return res.status(403).json({ error: 'Competition has ended, submissions are disabled' });
+      }
+    }
+
     const [result] = await pool.execute(
-      'INSERT INTO submissions (user_id, problem_id, code, language, status, score) VALUES (?, ?, ?, ?, ?, ?)',
-      [user_id, problem_id, code, language, 'Pending', 0]
+      'INSERT INTO submissions (user_id, problem_id, code, language, status, score, room_id, is_competition_submission) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [user_id, problem_id, code, language, 'Pending', 0, finalRoomId, isCompetitionSubmission]
     );
 
     const submission = {

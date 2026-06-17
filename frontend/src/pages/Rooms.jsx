@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
@@ -34,7 +34,21 @@ const getStatusBadgeClass = (status) => {
 const Rooms = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { currentRoom, roomMembers, roomMessages, createRoom, joinRoom, leaveRoom, sendMessage, isConnected } = useSocket();
+  const { 
+    currentRoom, 
+    roomMembers, 
+    roomMessages, 
+    createRoom, 
+    joinRoom, 
+    leaveRoom, 
+    sendMessage, 
+    isConnected,
+    competitionStatus,
+    competitionRankings,
+    competitionProblems,
+    startCompetition,
+    endCompetition
+  } = useSocket();
   const [roomName, setRoomName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [message, setMessage] = useState('');
@@ -53,6 +67,10 @@ const Rooms = () => {
   const messagesEndRef = React.useRef(null);
   const pollingRef = useRef(null);
   const wsTimeoutRef = useRef(null);
+  const [timeRemaining, setTimeRemaining] = useState(0);
+  const timerRef = useRef(null);
+  const [showRankings, setShowRankings] = useState(false);
+  const [competitionDuration, setCompetitionDuration] = useState(60);
 
   useEffect(() => {
     if (user) {
@@ -209,16 +227,26 @@ const Rooms = () => {
       alert('请先选择一道题目');
       return;
     }
+    if (isSubmissionLocked()) {
+      alert('比赛已结束，无法提交代码');
+      return;
+    }
 
     setSubmitting(true);
     setJudgeResult(null);
     setWsReceived(false);
     try {
-      const res = await submissionAPI.submit({
+      const submitData = {
         problem_id: selectedProblem.id,
         code,
         language
-      });
+      };
+
+      if (currentRoom && isCompetitionRunning()) {
+        submitData.room_id = currentRoom.roomId || currentRoom.id;
+      }
+
+      const res = await submissionAPI.submit(submitData);
       setPollingId(res.data.id);
       setLastSubmission({ id: res.data.id, status: 'Pending' });
     } catch (error) {
@@ -232,6 +260,117 @@ const Rooms = () => {
     const colors = { Easy: 'difficulty-easy', Medium: 'difficulty-medium', Hard: 'difficulty-hard' };
     return colors[difficulty] || 'difficulty-easy';
   };
+
+  const formatTime = useCallback((seconds) => {
+    if (seconds <= 0) return '00:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }, []);
+
+  const isRoomOwner = useCallback(() => {
+    if (!currentRoom || !user) return false;
+    return currentRoom.creatorId === user.id || user.role === 'admin';
+  }, [currentRoom, user]);
+
+  const getRoomStatus = useCallback(() => {
+    if (!currentRoom) return 'idle';
+    return currentRoom.status || 'idle';
+  }, [currentRoom]);
+
+  const isCompetitionRunning = useCallback(() => {
+    return getRoomStatus() === 'running';
+  }, [getRoomStatus]);
+
+  const isCompetitionEnded = useCallback(() => {
+    return getRoomStatus() === 'ended';
+  }, [getRoomStatus]);
+
+  const isSubmissionLocked = useCallback(() => {
+    if (!currentRoom) return false;
+    return currentRoom.is_locked === 1 || isCompetitionEnded();
+  }, [currentRoom, isCompetitionEnded]);
+
+  const getDisplayProblems = useCallback(() => {
+    if (isCompetitionRunning() && competitionProblems.length > 0) {
+      return competitionProblems;
+    }
+    return problems;
+  }, [isCompetitionRunning, competitionProblems, problems]);
+
+  const handleStartCompetition = () => {
+    if (!isRoomOwner()) return;
+    if (!currentRoom) return;
+    if (isCompetitionRunning()) return;
+    startCompetition(currentRoom.roomCode, competitionDuration);
+  };
+
+  const handleEndCompetition = () => {
+    if (!isRoomOwner()) return;
+    if (!currentRoom) return;
+    if (!isCompetitionRunning()) return;
+    if (confirm('确定要结束比赛吗？结束后将无法提交代码。')) {
+      endCompetition(currentRoom.roomCode);
+    }
+  };
+
+  useEffect(() => {
+    if (isCompetitionRunning() && currentRoom?.end_time) {
+      const updateTimer = () => {
+        const endTime = new Date(currentRoom.end_time).getTime();
+        const now = Date.now();
+        const remaining = Math.max(0, Math.floor((endTime - now) / 1000));
+        setTimeRemaining(remaining);
+        if (remaining <= 0) {
+          if (timerRef.current) {
+            clearInterval(timerRef.current);
+          }
+        }
+      };
+      updateTimer();
+      timerRef.current = setInterval(updateTimer, 1000);
+    } else if (competitionStatus?.status === 'running' && competitionStatus?.end_time) {
+      const updateTimer = () => {
+        const endTime = new Date(competitionStatus.end_time).getTime();
+        const now = Date.now();
+        const remaining = Math.max(0, Math.floor((endTime - now) / 1000));
+        setTimeRemaining(remaining);
+        if (remaining <= 0) {
+          if (timerRef.current) {
+            clearInterval(timerRef.current);
+          }
+        }
+      };
+      updateTimer();
+      timerRef.current = setInterval(updateTimer, 1000);
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+      setTimeRemaining(0);
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [currentRoom, competitionStatus, isCompetitionRunning]);
+
+  useEffect(() => {
+    if (currentRoom?.status === 'running' && currentRoom?.end_time) {
+      const endTime = new Date(currentRoom.end_time).getTime();
+      const checkEnd = () => {
+        if (Date.now() >= endTime) {
+          if (isRoomOwner()) {
+            endCompetition(currentRoom.roomCode);
+          }
+        }
+      };
+      const checkInterval = setInterval(checkEnd, 1000);
+      return () => clearInterval(checkInterval);
+    }
+  }, [currentRoom, isRoomOwner, endCompetition]);
 
   if (!currentRoom) {
     return (
@@ -294,6 +433,13 @@ const Rooms = () => {
     );
   }
 
+  const getRankingsDisplay = () => {
+    if (competitionRankings && competitionRankings.length > 0) {
+      return competitionRankings;
+    }
+    return currentRoom?.rankings || [];
+  };
+
   return (
     <div className="room-container room-3col">
       <div className="room-header">
@@ -302,9 +448,61 @@ const Rooms = () => {
           <div className="room-code-display">
             房间号: <span className="code-highlight">{currentRoom.roomCode}</span>
             <button className="btn btn-sm" onClick={() => navigator.clipboard.writeText(currentRoom.roomCode)} style={{ marginLeft: '10px' }}>复制</button>
+            {isCompetitionRunning() && (
+              <span style={{ marginLeft: '15px' }}>
+                <span className="badge" style={{ background: '#28a745', marginRight: '8px' }}>比赛进行中</span>
+                <span style={{ 
+                  fontFamily: 'Monaco, Menlo, monospace', 
+                  fontSize: '1.25rem', 
+                  fontWeight: 'bold',
+                  color: timeRemaining <= 60 ? '#dc3545' : timeRemaining <= 300 ? '#ffc107' : '#fff'
+                }}>
+                  ⏱️ {formatTime(timeRemaining)}
+                </span>
+              </span>
+            )}
+            {isCompetitionEnded() && (
+              <span className="badge" style={{ background: '#6c757d', marginLeft: '15px' }}>比赛已结束</span>
+            )}
           </div>
         </div>
         <div className="room-header-actions">
+          {isRoomOwner() && !isCompetitionRunning() && !isCompetitionEnded() && (
+            <>
+              <select
+                value={competitionDuration}
+                onChange={(e) => setCompetitionDuration(parseInt(e.target.value))}
+                style={{ padding: '0.5rem', borderRadius: '8px', border: 'none' }}
+              >
+                <option value={30}>30分钟</option>
+                <option value={60}>60分钟</option>
+                <option value={90}>90分钟</option>
+                <option value={120}>120分钟</option>
+              </select>
+              <button 
+                className="btn btn-primary" 
+                onClick={handleStartCompetition}
+                disabled={!isConnected}
+              >
+                🚀 开始比赛
+              </button>
+            </>
+          )}
+          {isRoomOwner() && isCompetitionRunning() && (
+            <button 
+              className="btn btn-danger" 
+              onClick={handleEndCompetition}
+              disabled={!isConnected}
+            >
+              🏁 结束比赛
+            </button>
+          )}
+          <button 
+            className={`btn ${showRankings ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setShowRankings(!showRankings)}
+          >
+            🏆 排名
+          </button>
           <button className="btn btn-secondary" onClick={() => navigate('/problems')}>全部题目</button>
           <button className="btn btn-danger" onClick={() => { setSelectedProblem(null); leaveRoom(); }}>离开房间</button>
         </div>
@@ -327,15 +525,64 @@ const Rooms = () => {
               ))}
             </div>
           </div>
+
+          {showRankings && (isCompetitionRunning() || isCompetitionEnded()) && (
+            <div className="problems-section">
+              <h3>🏆 比赛排名</h3>
+              <div className="rankings-list" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                {getRankingsDisplay().length === 0 ? (
+                  <div className="empty-text">暂无排名数据</div>
+                ) : (
+                  getRankingsDisplay().map((member, index) => (
+                    <div key={member.user_id} className="ranking-item" style={{
+                      padding: '0.75rem',
+                      marginBottom: '0.5rem',
+                      background: member.user_id === user?.id ? '#e3f2fd' : '#f8f9fa',
+                      borderRadius: '8px',
+                      border: member.user_id === user?.id ? '2px solid #2196f3' : '1px solid #e0e0e0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem'
+                    }}>
+                      <span style={{
+                        fontWeight: 'bold',
+                        fontSize: index < 3 ? '1.5rem' : '1.2rem',
+                        color: index === 0 ? '#ffd700' : index === 1 ? '#c0c0c0' : index === 2 ? '#cd7f32' : '#666',
+                        minWidth: '32px',
+                        textAlign: 'center'
+                      }}>
+                        {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : index + 1}
+                      </span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: '500', color: '#333' }}>
+                          {member.username}
+                          {member.user_id === currentRoom.creatorId && <span className="badge badge-creator" style={{ marginLeft: '5px', fontSize: '0.7rem' }}>房主</span>}
+                        </div>
+                        <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '2px' }}>
+                          解题数: <span style={{ fontWeight: 'bold', color: '#28a745' }}>{member.solved_count || 0}</span> 题
+                          {member.total_time !== undefined && member.total_time !== null && (
+                            <span style={{ marginLeft: '10px' }}>
+                              用时: <span style={{ fontWeight: 'bold', color: '#ffc107' }}>{member.total_time}</span> 分
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="problems-section">
-            <h3>题目列表</h3>
+            <h3>题目列表 {isCompetitionRunning() && <span className="badge" style={{ background: '#667eea', marginLeft: '8px' }}>比赛专用</span>}</h3>
             <div className="room-problem-list">
               {problemsLoading ? (
                 <div className="loading-text">加载中...</div>
-              ) : problems.length === 0 ? (
-                <div className="empty-text">暂无题目</div>
+              ) : getDisplayProblems().length === 0 ? (
+                <div className="empty-text">{isCompetitionRunning() ? '等待比赛开始...' : '暂无题目'}</div>
               ) : (
-                problems.map((problem) => (
+                getDisplayProblems().map((problem) => (
                   <div
                     key={problem.id}
                     className={`room-problem-item ${selectedProblem?.id === problem.id ? 'selected' : ''}`}
@@ -394,14 +641,29 @@ const Rooms = () => {
 
               <div className="code-section">
                 <div className="card">
-                  <h2 style={{ marginBottom: '0.75rem', color: '#667eea', fontSize: '1.1rem' }}>提交代码</h2>
+                  <h2 style={{ marginBottom: '0.75rem', color: '#667eea', fontSize: '1.1rem' }}>
+                    提交代码
+                    {isSubmissionLocked() && <span className="badge" style={{ background: '#dc3545', marginLeft: '10px', fontSize: '0.8rem' }}>已锁定</span>}
+                  </h2>
+                  {isSubmissionLocked() && (
+                    <div style={{
+                      padding: '1rem',
+                      background: '#f8d7da',
+                      border: '1px solid #dc3545',
+                      borderRadius: '8px',
+                      marginBottom: '1rem',
+                      color: '#721c24'
+                    }}>
+                      ⚠️ 比赛已结束，代码提交功能已锁定。
+                    </div>
+                  )}
                   <div className="language-select">
                     <label>
-                      <input type="radio" name="room-language" value="cpp" checked={language === 'cpp'} onChange={(e) => setLanguage(e.target.value)} />
+                      <input type="radio" name="room-language" value="cpp" checked={language === 'cpp'} onChange={(e) => setLanguage(e.target.value)} disabled={isSubmissionLocked()} />
                       C++
                     </label>
                     <label>
-                      <input type="radio" name="room-language" value="python" checked={language === 'python'} onChange={(e) => setLanguage(e.target.value)} />
+                      <input type="radio" name="room-language" value="python" checked={language === 'python'} onChange={(e) => setLanguage(e.target.value)} disabled={isSubmissionLocked()} />
                       Python
                     </label>
                   </div>
@@ -410,10 +672,12 @@ const Rooms = () => {
                     onChange={(e) => setCode(e.target.value)}
                     placeholder="在此输入代码..."
                     style={{ fontSize: '0.85rem', minHeight: '200px' }}
+                    disabled={isSubmissionLocked()}
+                    readOnly={isSubmissionLocked()}
                   />
                   <div className="submission-actions">
-                    <button className="btn btn-primary" onClick={handleSubmit} disabled={submitting || !!pollingId}>
-                      {submitting ? '提交中...' : pollingId ? '判题中...' : '提交代码'}
+                    <button className="btn btn-primary" onClick={handleSubmit} disabled={submitting || !!pollingId || isSubmissionLocked()}>
+                      {isSubmissionLocked() ? '已锁定' : submitting ? '提交中...' : pollingId ? '判题中...' : '提交代码'}
                     </button>
                     {lastSubmission && !pollingId && !judgeResult && (
                       <span className={`status-badge status-${statusToClass(lastSubmission.status)}`}>

@@ -193,6 +193,149 @@ class SocketManager {
         }
       });
 
+      socket.on('start_competition', async (data) => {
+        try {
+          if (!socket.user) {
+            socket.emit('room_error', { message: 'Please authenticate first' });
+            return;
+          }
+
+          const { roomCode, duration_minutes = 60 } = data;
+          if (!roomCode) return;
+
+          const [rooms] = await pool.execute(
+            'SELECT * FROM rooms WHERE room_code = ?',
+            [roomCode]
+          );
+
+          if (rooms.length === 0) {
+            socket.emit('room_error', { message: 'Room not found' });
+            return;
+          }
+
+          const room = rooms[0];
+          if (room.creator_id !== socket.user.id && socket.user.role !== 'admin') {
+            socket.emit('room_error', { message: 'Only room owner or admin can start competition' });
+            return;
+          }
+
+          if (room.status === 'running') {
+            socket.emit('room_error', { message: 'Competition is already running' });
+            return;
+          }
+
+          const startTime = new Date();
+          const endTime = new Date(startTime.getTime() + duration_minutes * 60 * 1000);
+
+          await pool.execute(`
+            UPDATE rooms 
+            SET status = 'running', start_time = ?, end_time = ?, duration_minutes = ?, is_locked = 0
+            WHERE id = ?
+          `, [startTime, endTime, duration_minutes, room.id]);
+
+          await pool.execute(`
+            UPDATE room_members 
+            SET solved_count = 0, total_time = 0, last_ac_time = NULL, competition_score = 0
+            WHERE room_id = ?
+          `, [room.id]);
+
+          const [problems] = await pool.execute(`
+            SELECT id, title, description, input_format, output_format, 
+                   time_limit, memory_limit, sample_input, sample_output, 
+                   test_case_count, difficulty, created_at
+            FROM problems 
+            ORDER BY id ASC
+          `);
+
+          const [members] = await pool.execute(`
+            SELECT u.id, u.username, u.role, rm.joined_at,
+                   rm.solved_count, rm.total_time, rm.competition_score
+            FROM room_members rm
+            LEFT JOIN users u ON rm.user_id = u.id
+            WHERE rm.room_id = ?
+            ORDER BY rm.joined_at ASC
+          `, [room.id]);
+
+          this.io.to(roomCode).emit('competition_started', {
+            room_code: roomCode,
+            room_id: room.id,
+            start_time: startTime,
+            end_time: endTime,
+            duration_minutes,
+            problems,
+            members
+          });
+        } catch (error) {
+          console.error('Start competition error:', error);
+          socket.emit('room_error', { message: 'Failed to start competition' });
+        }
+      });
+
+      socket.on('end_competition', async (data) => {
+        try {
+          if (!socket.user) {
+            socket.emit('room_error', { message: 'Please authenticate first' });
+            return;
+          }
+
+          const { roomCode } = data;
+          if (!roomCode) return;
+
+          const [rooms] = await pool.execute(
+            'SELECT * FROM rooms WHERE room_code = ?',
+            [roomCode]
+          );
+
+          if (rooms.length === 0) {
+            socket.emit('room_error', { message: 'Room not found' });
+            return;
+          }
+
+          const room = rooms[0];
+          if (room.creator_id !== socket.user.id && socket.user.role !== 'admin') {
+            socket.emit('room_error', { message: 'Only room owner or admin can end competition' });
+            return;
+          }
+
+          if (room.status !== 'running') {
+            socket.emit('room_error', { message: 'No competition is running' });
+            return;
+          }
+
+          const endTime = new Date();
+
+          await pool.execute(`
+            UPDATE rooms 
+            SET status = 'ended', end_time = ?, is_locked = 1
+            WHERE id = ?
+          `, [endTime, room.id]);
+
+          const [rankings] = await pool.execute(`
+            SELECT 
+              rm.user_id,
+              u.username,
+              rm.solved_count,
+              rm.total_time,
+              rm.competition_score,
+              rm.last_ac_time
+            FROM room_members rm
+            LEFT JOIN users u ON rm.user_id = u.id
+            WHERE rm.room_id = ?
+            ORDER BY rm.competition_score DESC, rm.last_ac_time ASC
+          `, [room.id]);
+
+          this.io.to(roomCode).emit('competition_ended', {
+            room_code: roomCode,
+            room_id: room.id,
+            end_time: endTime,
+            rankings
+          });
+        } catch (error) {
+          console.error('End competition error:', error);
+          socket.emit('room_error', { message: 'Failed to end competition' });
+        }
+      });
+
       socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
         if (socket.user) {

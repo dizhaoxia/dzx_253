@@ -44,7 +44,8 @@ router.get('/:roomCode', authenticateToken, async (req, res) => {
     const room = rooms[0];
 
     const [members] = await pool.execute(`
-      SELECT u.id, u.username, u.role, rm.joined_at
+      SELECT u.id, u.username, u.role, rm.joined_at,
+             rm.solved_count, rm.total_time, rm.competition_score, rm.last_ac_time
       FROM room_members rm
       LEFT JOIN users u ON rm.user_id = u.id
       WHERE rm.room_id = ?
@@ -60,10 +61,25 @@ router.get('/:roomCode', authenticateToken, async (req, res) => {
       LIMIT 100
     `, [room.id]);
 
+    const [rankings] = await pool.execute(`
+      SELECT 
+        rm.user_id,
+        u.username,
+        rm.solved_count,
+        rm.total_time,
+        rm.competition_score,
+        rm.last_ac_time
+      FROM room_members rm
+      LEFT JOIN users u ON rm.user_id = u.id
+      WHERE rm.room_id = ?
+      ORDER BY rm.competition_score DESC, rm.last_ac_time ASC
+    `, [room.id]);
+
     res.json({
       ...room,
       members,
-      messages: messages.reverse()
+      messages: messages.reverse(),
+      rankings
     });
   } catch (error) {
     console.error('Get room error:', error);
@@ -185,6 +201,216 @@ router.post('/:roomCode/leave', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Leave room error:', error);
     res.status(500).json({ error: 'Failed to leave room' });
+  }
+});
+
+const checkRoomOwnerOrAdmin = async (roomId, userId, userRole) => {
+  const [rooms] = await pool.execute(
+    'SELECT creator_id FROM rooms WHERE id = ?',
+    [roomId]
+  );
+  if (rooms.length === 0) return false;
+  return rooms[0].creator_id === userId || userRole === 'admin';
+};
+
+router.post('/:roomCode/start', authenticateToken, async (req, res) => {
+  try {
+    const { roomCode } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+    const { duration_minutes = 60 } = req.body;
+
+    const [rooms] = await pool.execute(
+      'SELECT r.*, u.username as creator_name FROM rooms r LEFT JOIN users u ON r.creator_id = u.id WHERE room_code = ?',
+      [roomCode]
+    );
+    if (rooms.length === 0) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+
+    const room = rooms[0];
+
+    if (!(await checkRoomOwnerOrAdmin(room.id, userId, userRole))) {
+      return res.status(403).json({ error: 'Only room owner or admin can start competition' });
+    }
+
+    if (room.status === 'running') {
+      return res.status(400).json({ error: 'Competition is already running' });
+    }
+
+    const startTime = new Date();
+    const endTime = new Date(startTime.getTime() + duration_minutes * 60 * 1000);
+
+    await pool.execute(`
+      UPDATE rooms 
+      SET status = 'running', 
+          start_time = ?, 
+          end_time = ?, 
+          duration_minutes = ?,
+          is_locked = 0
+      WHERE id = ?
+    `, [startTime, endTime, duration_minutes, room.id]);
+
+    await pool.execute(`
+      UPDATE room_members 
+      SET solved_count = 0, total_time = 0, last_ac_time = NULL, competition_score = 0
+      WHERE room_id = ?
+    `, [room.id]);
+
+    const [problems] = await pool.execute(`
+      SELECT id, title, description, input_format, output_format, 
+             time_limit, memory_limit, sample_input, sample_output, 
+             test_case_count, difficulty, created_at
+      FROM problems 
+      ORDER BY id ASC
+    `);
+
+    const [members] = await pool.execute(`
+      SELECT u.id, u.username, u.role, rm.joined_at,
+             rm.solved_count, rm.total_time, rm.competition_score
+      FROM room_members rm
+      LEFT JOIN users u ON rm.user_id = u.id
+      WHERE rm.room_id = ?
+      ORDER BY rm.joined_at ASC
+    `, [room.id]);
+
+    const { getSocketManager } = require('../realTime/socketManager');
+    const socketManager = getSocketManager();
+    if (socketManager) {
+      socketManager.broadcastToRoom(roomCode, 'competition_started', {
+        room_code: roomCode,
+        room_id: room.id,
+        start_time: startTime,
+        end_time: endTime,
+        duration_minutes,
+        problems,
+        members
+      });
+    }
+
+    res.json({
+      message: 'Competition started successfully',
+      room: {
+        ...room,
+        status: 'running',
+        start_time: startTime,
+        end_time: endTime,
+        duration_minutes
+      },
+      problems,
+      members
+    });
+  } catch (error) {
+    console.error('Start competition error:', error);
+    res.status(500).json({ error: 'Failed to start competition' });
+  }
+});
+
+router.post('/:roomCode/end', authenticateToken, async (req, res) => {
+  try {
+    const { roomCode } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    const [rooms] = await pool.execute(
+      'SELECT * FROM rooms WHERE room_code = ?',
+      [roomCode]
+    );
+    if (rooms.length === 0) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+
+    const room = rooms[0];
+
+    if (!(await checkRoomOwnerOrAdmin(room.id, userId, userRole))) {
+      return res.status(403).json({ error: 'Only room owner or admin can end competition' });
+    }
+
+    if (room.status !== 'running') {
+      return res.status(400).json({ error: 'No competition is running' });
+    }
+
+    const endTime = new Date();
+
+    await pool.execute(`
+      UPDATE rooms 
+      SET status = 'ended', 
+          end_time = ?,
+          is_locked = 1
+      WHERE id = ?
+    `, [endTime, room.id]);
+
+    const [rankings] = await pool.execute(`
+      SELECT 
+        rm.user_id,
+        u.username,
+        rm.solved_count,
+        rm.total_time,
+        rm.competition_score,
+        rm.last_ac_time
+      FROM room_members rm
+      LEFT JOIN users u ON rm.user_id = u.id
+      WHERE rm.room_id = ?
+      ORDER BY rm.competition_score DESC, rm.last_ac_time ASC
+    `, [room.id]);
+
+    const { getSocketManager } = require('../realTime/socketManager');
+    const socketManager = getSocketManager();
+    if (socketManager) {
+      socketManager.broadcastToRoom(roomCode, 'competition_ended', {
+        room_code: roomCode,
+        room_id: room.id,
+        end_time: endTime,
+        rankings
+      });
+    }
+
+    res.json({
+      message: 'Competition ended successfully',
+      room: {
+        ...room,
+        status: 'ended',
+        end_time: endTime,
+        is_locked: 1
+      },
+      rankings
+    });
+  } catch (error) {
+    console.error('End competition error:', error);
+    res.status(500).json({ error: 'Failed to end competition' });
+  }
+});
+
+router.get('/:roomCode/rankings', authenticateToken, async (req, res) => {
+  try {
+    const { roomCode } = req.params;
+
+    const [rooms] = await pool.execute('SELECT id FROM rooms WHERE room_code = ?', [roomCode]);
+    if (rooms.length === 0) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+
+    const [rankings] = await pool.execute(`
+      SELECT 
+        rm.user_id,
+        u.username,
+        rm.solved_count,
+        rm.total_time,
+        rm.competition_score,
+        rm.last_ac_time
+      FROM room_members rm
+      LEFT JOIN users u ON rm.user_id = u.id
+      WHERE rm.room_id = ?
+      ORDER BY rm.competition_score DESC, rm.last_ac_time ASC
+    `, [rooms[0].id]);
+
+    res.json({
+      room_code: roomCode,
+      rankings
+    });
+  } catch (error) {
+    console.error('Get room rankings error:', error);
+    res.status(500).json({ error: 'Failed to get room rankings' });
   }
 });
 
