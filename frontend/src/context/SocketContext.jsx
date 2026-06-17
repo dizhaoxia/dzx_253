@@ -245,6 +245,12 @@ export const SocketProvider = ({ children }) => {
     }
   }, [isConnected]);
 
+  const resetCompetitionState = useCallback(() => {
+    setCompetitionStatus(null);
+    setCompetitionRankings([]);
+    setCompetitionProblems([]);
+  }, []);
+
   const leaveRoom = useCallback((roomCode) => {
     if (socketRef.current && currentRoom) {
       const code = roomCode || currentRoom.roomCode;
@@ -280,12 +286,6 @@ export const SocketProvider = ({ children }) => {
       console.warn('⚠️ Socket not connected, cannot end competition');
     }
   }, [isConnected]);
-
-  const resetCompetitionState = useCallback(() => {
-    setCompetitionStatus(null);
-    setCompetitionRankings([]);
-    setCompetitionProblems([]);
-  }, []);
 
   useEffect(() => {
     if (user) {
